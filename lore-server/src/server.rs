@@ -49,7 +49,9 @@ use lore_transport::quic::client::ClientCerts;
 use lore_transport::quic::client::ServiceClient;
 use lore_transport::quic::storage_service::client::StorageClient;
 use opentelemetry::KeyValue;
+use opentelemetry_sdk::resource::ResourceDetector;
 use rustls::server::NoClientAuth;
+use tokio::runtime::Handle;
 use tokio::task::JoinSet;
 use tracing::Instrument;
 use tracing::debug;
@@ -103,6 +105,7 @@ use crate::store::replica_factory::ReplicationStoreTargetFactory;
 use crate::store::replicated_store::ReplicatedStore;
 use crate::store::resolve_plugin_config_with_fallback;
 use crate::telemetry::OtelTokioRuntimeMetrics;
+use crate::telemetry::ResourceDetectorProvider;
 use crate::telemetry::TelemetryInitializer;
 use crate::tls::load_client_tls;
 use crate::topology::configure_topology_with_registry;
@@ -1500,6 +1503,28 @@ fn observe_task_lifecycles() {
     }
 }
 
+/// [`ResourceDetectorProvider`] that augments an optional caller-supplied
+/// provider with the resource detectors contributed by every compiled-in plugin.
+///
+/// The base server has no caller-supplied provider (`inner` is `None`); derived
+/// binaries may set [`ServerConfig::resource_detector_provider`] to add detectors
+/// on top of the plugin-contributed ones.
+struct PluginResourceDetectorProvider<'a> {
+    inner: Option<&'a dyn ResourceDetectorProvider>,
+    registry: &'a PluginRegistry,
+}
+
+impl ResourceDetectorProvider for PluginResourceDetectorProvider<'_> {
+    fn detectors(&self, runtime_handle: Handle) -> Vec<Box<dyn ResourceDetector>> {
+        let mut detectors = self
+            .inner
+            .map(|provider| provider.detectors(runtime_handle.clone()))
+            .unwrap_or_default();
+        detectors.extend(self.registry.resource_detectors(runtime_handle));
+        detectors
+    }
+}
+
 async fn async_main(settings: (Settings, StringHash), config: ServerConfig) -> Result<()> {
     // Initialize metrics and tracing telemetry, returns a guard that will cleanup when it falls out
     // of scope
@@ -1507,12 +1532,27 @@ async fn async_main(settings: (Settings, StringHash), config: ServerConfig) -> R
     let runtime = runtime();
     let telemetry = settings.telemetry.clone().unwrap_or_default();
     let metrics_config = telemetry.metrics.clone().unwrap_or_default();
-    let _guard = TelemetryInitializer::from_config(
-        &telemetry,
-        runtime.clone(),
-        config.resource_detector_provider.as_deref(),
-    )?
-    .init()?;
+
+    // Initialize the plugin registry before telemetry: start with the
+    // pre-populated registry from config, then register any build.rs-discovered
+    // plugins. This must happen first so that every compiled-in plugin can
+    // contribute OpenTelemetry resource detectors describing the deployment
+    // environment it implies (e.g. AWS region, Nomad allocation).
+    let mut plugin_registry = config.plugin_registry;
+    plugins::register_all_plugins(&mut plugin_registry);
+
+    let _guard = {
+        let resource_detector_provider = PluginResourceDetectorProvider {
+            inner: config.resource_detector_provider.as_deref(),
+            registry: &plugin_registry,
+        };
+        TelemetryInitializer::from_config(
+            &telemetry,
+            runtime.clone(),
+            Some(&resource_detector_provider),
+        )?
+        .init()?
+    };
 
     observe_task_lifecycles();
 
@@ -1557,10 +1597,6 @@ async fn async_main(settings: (Settings, StringHash), config: ServerConfig) -> R
         std::sync::atomic::Ordering::Release,
     );
 
-    // Initialize plugin registry: start with the pre-populated registry from config,
-    // then register any build.rs-discovered plugins
-    let mut plugin_registry = config.plugin_registry;
-    plugins::register_all_plugins(&mut plugin_registry);
     info!(
         "Registered plugins - immutable stores: {:?}, mutable stores: {:?}, lock stores: {:?}, topology: {:?}, notification: {:?}",
         plugin_registry.list_immutable_store_plugins(),

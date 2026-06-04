@@ -86,6 +86,10 @@
 pub mod registry;
 pub mod traits;
 
+// Auto-discovered plugin modules
+pub mod aws;
+pub mod hashicorp;
+
 // Re-export commonly used items at the module level
 pub use registry::PluginRegistry;
 pub use traits::ImmutableStorePluginFactory;
@@ -120,6 +124,6 @@ pub use traits::TopologyPluginFactory;
 /// let stores = registry.list_immutable_store_plugins();
 /// ```
 pub fn register_all_plugins(registry: &mut PluginRegistry) {
-    // No plugins discovered - registry will be empty
-    let _ = registry; // Suppress unused variable warning
+    aws::register(registry);
+    hashicorp::register(registry);
 }

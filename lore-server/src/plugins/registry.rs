@@ -15,6 +15,8 @@ use lore_revision::cluster::topology::Topology;
 use lore_revision::lock::LockStore;
 use lore_storage::ImmutableStore;
 use lore_storage::MutableStore;
+use opentelemetry_sdk::resource::ResourceDetector;
+use tokio::runtime::Handle;
 use tracing::error;
 use tracing::info;
 
@@ -27,12 +29,22 @@ use crate::plugins::traits::NotificationPluginFactory;
 use crate::plugins::traits::PluginError;
 use crate::plugins::traits::TopologyPluginFactory;
 
+/// Factory closure that builds an OpenTelemetry resource detector given a
+/// runtime handle.
+///
+/// The handle is for detectors that perform async work during detection (e.g.
+/// querying instance metadata).
+type ResourceDetectorFactory = Box<dyn Fn(Handle) -> Box<dyn ResourceDetector> + Send + Sync>;
+
 /// Registry for plugin factories.
 ///
 /// The registry maintains separate maps for each type of plugin factory:
 /// - Immutable store plugins (e.g., local filesystem, S3)
 /// - Mutable store plugins (e.g., local filesystem, `DynamoDB`)
 /// - Topology plugins (e.g., fixed, Consul)
+///
+/// It also holds the resource detector factories registered by plugin modules
+/// (see [`register_resource_detector`](Self::register_resource_detector)).
 ///
 /// Plugins are registered at application startup, typically via compile-time
 /// feature flags. The registry is then used to create plugin instances based
@@ -44,12 +56,45 @@ pub struct PluginRegistry {
     lock_store_factories: HashMap<&'static str, Box<dyn LockStorePluginFactory>>,
     topology_factories: HashMap<&'static str, Box<dyn TopologyPluginFactory>>,
     notification_factories: HashMap<&'static str, Box<dyn NotificationPluginFactory>>,
+    resource_detector_factories: Vec<ResourceDetectorFactory>,
 }
 
 impl PluginRegistry {
     /// Creates a new empty plugin registry.
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Registers an OpenTelemetry resource detector factory.
+    ///
+    /// Plugin modules register the detector(s) describing the deployment
+    /// environment they imply (for example the AWS region, or Nomad allocation
+    /// and job attributes). A detector is registered by the module independently
+    /// of the store or topology plugins it also registers, so that unrelated
+    /// concerns are not coupled together.
+    ///
+    /// The factory receives a runtime handle for detectors that perform async
+    /// work during detection (e.g. querying instance metadata).
+    pub fn register_resource_detector<F>(&mut self, factory: F)
+    where
+        F: Fn(Handle) -> Box<dyn ResourceDetector> + Send + Sync + 'static,
+    {
+        self.resource_detector_factories.push(Box::new(factory));
+    }
+
+    /// Builds the OpenTelemetry resource detectors registered by every
+    /// compiled-in plugin module.
+    ///
+    /// Detectors are registered via
+    /// [`register_resource_detector`](Self::register_resource_detector) and
+    /// gathered purely on the basis of the plugin module being compiled in; the
+    /// configured backend is not consulted. The runtime handle is forwarded to
+    /// each factory for detectors that perform async work during detection.
+    pub fn resource_detectors(&self, runtime_handle: Handle) -> Vec<Box<dyn ResourceDetector>> {
+        self.resource_detector_factories
+            .iter()
+            .map(|factory| factory(runtime_handle.clone()))
+            .collect()
     }
 
     /// Registers an immutable store plugin factory.
@@ -694,6 +739,15 @@ mod tests {
 
     use super::*;
 
+    /// Mock resource detector for testing detector registration.
+    struct MockResourceDetector;
+
+    impl ResourceDetector for MockResourceDetector {
+        fn detect(&self) -> opentelemetry_sdk::resource::Resource {
+            opentelemetry_sdk::resource::Resource::builder_empty().build()
+        }
+    }
+
     /// Mock immutable store for testing
     struct MockImmutableStore;
 
@@ -1273,6 +1327,43 @@ mod tests {
         fn name(&self) -> &'static str {
             self.name
         }
+    }
+
+    #[tokio::test]
+    async fn test_resource_detectors_empty_without_registered_detectors() {
+        let mut registry = PluginRegistry::new();
+        registry.register_immutable_store_plugin(Box::new(MockImmutableStoreFactory::new("mock")));
+
+        // Registering a store plugin does not register a detector; detectors are
+        // contributed only by explicit `register_resource_detector` calls.
+        assert!(registry.resource_detectors(Handle::current()).is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_register_resource_detector_collects_each_registered_detector() {
+        let mut registry = PluginRegistry::new();
+        registry.register_resource_detector(|_handle| {
+            Box::new(MockResourceDetector) as Box<dyn ResourceDetector>
+        });
+        registry.register_resource_detector(|_handle| {
+            Box::new(MockResourceDetector) as Box<dyn ResourceDetector>
+        });
+
+        assert_eq!(registry.resource_detectors(Handle::current()).len(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_aws_and_hashicorp_modules_each_register_one_resource_detector() {
+        let mut registry = PluginRegistry::new();
+        crate::plugins::aws::register(&mut registry);
+        crate::plugins::hashicorp::register(&mut registry);
+
+        let detectors = registry.resource_detectors(Handle::current());
+
+        // The AWS module registers a single detector (despite registering three
+        // store factories); the HashiCorp module registers the Nomad detector.
+        // Total: two.
+        assert_eq!(detectors.len(), 2);
     }
 
     #[test]
