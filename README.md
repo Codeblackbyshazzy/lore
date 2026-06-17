@@ -58,6 +58,7 @@ Lore is an open source version control system designed for unprecedented scalabi
 - **Quickstart** — install Lore and make your first commit by following the [quickstart guide](https://epicgames.github.io/lore/tutorials/quickstart/).
 - **Read the docs** — delve into Lore's ethos and architecture in the [Lore documentation](https://epicgames.github.io/lore/).
 - **Have questions?** — the [FAQ](https://epicgames.github.io/lore/faq/) covers licensing, supported platforms, production readiness, and how Lore compares to other version control systems.
+- **See where Lore is headed** — the [roadmap](https://epicgames.github.io/lore/roadmap/) lays out the big-rock features by time horizon, from scalable locking to an open source desktop client.
 - **Join the conversation** — chat with us and our community on [Discord](https://discord.gg/E4SFJKRPbg).
 
 Or try it right now — install Lore and start a local server in demo mode:
