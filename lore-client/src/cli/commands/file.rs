@@ -1003,6 +1003,12 @@ pub fn handle_file_metadata_set(globals: LoreGlobalArgs, args: &FileMetadataSetA
     };
 
     let elements = convert_paths_and_targets(&args.pairs, &None);
+    if !elements.as_slice().len().is_multiple_of(2) {
+        println!(
+            "error: metadata set requires <key> <value> pairs; each key must be followed by a value"
+        );
+        return 1;
+    }
 
     let mut paths = vec![];
     let mut keys = vec![];

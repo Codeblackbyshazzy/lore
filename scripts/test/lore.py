@@ -731,6 +731,49 @@ class Lore:
             **kwargs,
         )
 
+    def branch_metadata_set(
+        self,
+        pairs: list[str] | None = None,
+        branch: str | None = None,
+        binary: bool = False,
+        numeric: bool = False,
+        **kwargs: Unpack[GlobalOptions],
+    ):
+        return self.run(
+            ["branch", "metadata", "set"]
+            + (pairs if pairs else [])
+            + (["--branch", branch] if branch else [])
+            + (["--binary"] if binary else [])
+            + (["--numeric"] if numeric else []),
+            **kwargs,
+        )
+
+    def branch_metadata_get(
+        self,
+        key: str | None = None,
+        branch: str | None = None,
+        **kwargs: Unpack[GlobalOptions],
+    ):
+        return self.run(
+            ["branch", "metadata", "get"]
+            + ([key] if key else [])
+            + (["--branch", branch] if branch else []),
+            **kwargs,
+        )
+
+    def branch_metadata_clear(
+        self,
+        keys: list[str] | None = None,
+        branch: str | None = None,
+        **kwargs: Unpack[GlobalOptions],
+    ):
+        return self.run(
+            ["branch", "metadata", "clear"]
+            + (keys if keys else [])
+            + (["--branch", branch] if branch else []),
+            **kwargs,
+        )
+
     @overload
     def revision_history(
         self,
