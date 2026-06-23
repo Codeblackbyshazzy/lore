@@ -220,6 +220,11 @@ use crate::store::event::LoreStorageGetDataEventData;
 use crate::store::event::LoreStorageGetHeaderEventData;
 use crate::store::event::LoreStorageGetItemCompleteEventData;
 use crate::store::event::LoreStorageGetMetadataItemCompleteEventData;
+use crate::store::event::LoreStorageMutableCompareAndSwapItemCompleteEventData;
+use crate::store::event::LoreStorageMutableListEntryEventData;
+use crate::store::event::LoreStorageMutableListItemCompleteEventData;
+use crate::store::event::LoreStorageMutableLoadItemCompleteEventData;
+use crate::store::event::LoreStorageMutableStoreItemCompleteEventData;
 use crate::store::event::LoreStorageObliterateItemCompleteEventData;
 use crate::store::event::LoreStorageOpenedEventData;
 use crate::store::event::LoreStoragePutItemCompleteEventData;
@@ -935,6 +940,19 @@ pub enum LoreEvent {
     RevisionTreeCommitComplete(LoreRevisionTreeCommitCompleteEventData),
     /// A close call completed.
     RevisionTreeCloseComplete(LoreRevisionTreeCloseCompleteEventData),
+    // Mutable-store API events are appended here rather than grouped with the other storage
+    // events above so that adding them does not renumber the `#[repr(C, u32)]` discriminants of
+    // the existing variants — new variants go at the end of this enum.
+    /// A mutable-load item completed.
+    StorageMutableLoadItemComplete(LoreStorageMutableLoadItemCompleteEventData),
+    /// A mutable-store item completed.
+    StorageMutableStoreItemComplete(LoreStorageMutableStoreItemCompleteEventData),
+    /// A mutable-compare-and-swap item completed.
+    StorageMutableCompareAndSwapItemComplete(LoreStorageMutableCompareAndSwapItemCompleteEventData),
+    /// One key-value entry in a mutable listing.
+    StorageMutableListEntry(LoreStorageMutableListEntryEventData),
+    /// A mutable-list item completed.
+    StorageMutableListItemComplete(LoreStorageMutableListItemCompleteEventData),
     /// A store eviction pass began.
     EvictionBegin(LoreEvictionBeginEventData),
     /// One bucket was evicted during a store eviction pass.

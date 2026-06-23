@@ -29,6 +29,11 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
     }
 
+    // `LoreEvent` is a cbindgen-exported C-API type defined in lore-revision, not in `lore`.
+    // Cargo does not re-run this build script when only a dependency crate changes, so watch the
+    // event source explicitly to keep the generated header in sync with the event enum.
+    println!("cargo:rerun-if-changed=../lore-revision/src/event.rs");
+
     // list input configuration files so that we run this script to update the c header
     println!("cargo:rerun-if-changed=cbindgen.toml");
 
