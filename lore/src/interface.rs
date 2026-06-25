@@ -7267,3 +7267,41 @@ pub extern "C" fn lore_revision_tree_close_async(
 ) {
     run_asynchronously(globals, args, callback, crate::revision_tree::close::close);
 }
+
+pub type LoreRevisionTreeResolvePathArgs =
+    crate::revision_tree::resolve_path::LoreRevisionTreeResolvePathArgs;
+
+/// Resolve a UTF-8 path against a loaded revision tree to a node id. An empty
+/// path resolves to the root node.
+///
+/// | Terminal event                                       | Payload                                             | Notes                                                       |
+/// |------------------------------------------------------|-----------------------------------------------------|-------------------------------------------------------------|
+/// | `LORE_EVENT_REVISION_TREE_RESOLVE_PATH_COMPLETE`     | `lore_revision_tree_resolve_path_complete_event_data_t` | Carries the resolved node id and the per-call outcome   |
+#[unsafe(no_mangle)]
+pub extern "C" fn lore_revision_tree_resolve_path(
+    globals: &LoreGlobalArgs,
+    args: &LoreRevisionTreeResolvePathArgs,
+    callback: LoreEventCallbackConfig,
+) -> i32 {
+    run_synchronously(
+        globals,
+        args,
+        callback,
+        crate::revision_tree::resolve_path::resolve_path,
+    )
+}
+
+/// Resolve a UTF-8 path against a loaded revision tree (async variant).
+#[unsafe(no_mangle)]
+pub extern "C" fn lore_revision_tree_resolve_path_async(
+    globals: &LoreGlobalArgs,
+    args: &LoreRevisionTreeResolvePathArgs,
+    callback: LoreEventCallbackConfig,
+) {
+    run_asynchronously(
+        globals,
+        args,
+        callback,
+        crate::revision_tree::resolve_path::resolve_path,
+    );
+}

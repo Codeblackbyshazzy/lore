@@ -145,4 +145,5 @@ pub enum LoreCommand {
     StorageMutableList(crate::storage::mutable_list::LoreStorageMutableListArgs),
     RevisionTreeLoad(crate::revision_tree::load::LoreRevisionTreeLoadArgs),
     RevisionTreeClose(crate::revision_tree::close::LoreRevisionTreeCloseArgs),
+    RevisionTreeResolvePath(crate::revision_tree::resolve_path::LoreRevisionTreeResolvePathArgs),
 }

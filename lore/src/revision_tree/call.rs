@@ -53,9 +53,11 @@ impl EventError for DispatchError {
 ///
 /// The helper:
 /// 1. Sets up an `ExecutionContext` and enters its `LORE_CONTEXT` scope.
-/// 2. Acquires a [`RevisionTreeGuard`] for the handle — if the handle is
-///    unknown or already closed, completes with the handle-miss error
-///    detail and returns its error code without invoking the verb impl.
+/// 2. Acquires a [`RevisionTreeGuard`] for the handle. If the handle is
+///    unknown or already closed, invokes `on_handle_miss` (letting the verb
+///    emit its own `*Complete` terminal carrying the caller id), then
+///    completes with the handle-miss error detail and returns its error code
+///    without invoking the verb impl.
 /// 3. Passes a cloned `Arc<RevisionTreeInternal>` to the verb impl
 ///    (ownership transferred; the impl can fan it out to spawned tasks).
 /// 4. Translates the impl's `Result` into a `Complete{status}` event.
@@ -68,18 +70,19 @@ impl EventError for DispatchError {
 /// before the returned future resolves — no background work outlives a
 /// data verb. Use `JoinSet` / `join_all` to await spawned futures before
 /// returning.
-#[allow(dead_code)] // Wired by per-verb modules.
-pub(crate) async fn revision_tree_call<Arg, T, F, Fut, ResT, ErrT>(
+pub(crate) async fn revision_tree_call<Arg, T, F, Fut, ResT, ErrT, M>(
     globals: LoreGlobalArgs,
     callback: LoreEventCallback,
     handle: LoreRevisionTree,
     args: Arg,
     caller: T,
+    on_handle_miss: M,
     command: F,
 ) -> i32
 where
     ErrT: EventError + FfiError + HasTrace,
     Arg: std::fmt::Debug,
+    M: FnOnce(),
     F: FnOnce(Arc<RevisionTreeInternal>, Arg) -> Fut,
     Fut: Future<Output = Result<ResT, ErrT>> + 'static,
 {
@@ -88,6 +91,7 @@ where
     LORE_CONTEXT
         .scope(execution, async move {
             let Some(guard) = RevisionTreeGuard::enter(handle) else {
+                on_handle_miss();
                 let err = DispatchError::from(InvalidArguments {
                     reason: "revision tree handle is unknown or has been closed".into(),
                 });
@@ -116,6 +120,7 @@ where
 #[cfg(test)]
 mod tests {
     use std::sync::Mutex;
+    use std::sync::atomic::AtomicBool;
     use std::sync::atomic::AtomicU64;
     use std::sync::atomic::Ordering;
 
@@ -132,16 +137,22 @@ mod tests {
     #[tokio::test]
     async fn handle_miss_completes_with_error_code_and_no_error_event() {
         let sink: Arc<Mutex<Vec<CapturedEvent>>> = Arc::new(Mutex::new(Vec::new()));
+        let missed = Arc::new(AtomicBool::new(false));
+        let missed_setter = missed.clone();
         let status = revision_tree_call(
             LoreGlobalArgs::default(),
             make_callback(sink.clone()),
             LoreRevisionTree::INVALID,
             (),
             "handle_miss_test",
+            move || missed_setter.store(true, Ordering::SeqCst),
             |_internal, _args: ()| async move { Ok::<_, DispatchError>(()) },
         )
         .await;
-
+        assert!(
+            missed.load(Ordering::SeqCst),
+            "on_handle_miss must fire when the handle is unknown"
+        );
         let events = sink.lock().unwrap().clone();
         assert!(
             !has_error_event(&events),
@@ -175,12 +186,15 @@ mod tests {
         let invoked_clone = invoked.clone();
 
         let sink: Arc<Mutex<Vec<CapturedEvent>>> = Arc::new(Mutex::new(Vec::new()));
+        let missed = Arc::new(AtomicBool::new(false));
+        let missed_setter = missed.clone();
         let status = revision_tree_call(
             LoreGlobalArgs::default(),
             make_callback(sink.clone()),
             handle_value,
             (),
             "happy_path_test",
+            move || missed_setter.store(true, Ordering::SeqCst),
             move |internal_arc, _args: ()| async move {
                 invoked_clone.fetch_add(1, Ordering::AcqRel);
                 assert!(internal_arc.in_flight.load(Ordering::Acquire) >= 1);
@@ -190,6 +204,10 @@ mod tests {
         .await;
 
         assert_eq!(status, 0);
+        assert!(
+            !missed.load(Ordering::SeqCst),
+            "on_handle_miss must not fire on the happy path"
+        );
         assert_eq!(invoked.load(Ordering::Acquire), 1);
         assert_eq!(
             internal.in_flight.load(Ordering::Acquire),
@@ -212,12 +230,15 @@ mod tests {
         let internal = test_support::new_for_testing().await;
         let handle_value = handle::register(internal.clone());
         let sink: Arc<Mutex<Vec<CapturedEvent>>> = Arc::new(Mutex::new(Vec::new()));
+        let missed = Arc::new(AtomicBool::new(false));
+        let missed_setter = missed.clone();
         let status = revision_tree_call(
             LoreGlobalArgs::default(),
             make_callback(sink.clone()),
             handle_value,
             (),
             "verb_error_test",
+            move || missed_setter.store(true, Ordering::SeqCst),
             move |_internal, _args: ()| async move {
                 Err::<(), _>(DispatchError::from(InvalidArguments {
                     reason: "simulated verb error".into(),
@@ -225,6 +246,10 @@ mod tests {
             },
         )
         .await;
+        assert!(
+            !missed.load(Ordering::SeqCst),
+            "on_handle_miss must not fire when the handle resolves"
+        );
         assert_eq!(
             internal.in_flight.load(Ordering::Acquire),
             0,

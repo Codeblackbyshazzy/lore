@@ -10681,3 +10681,18 @@ int32_t lore_revision_tree_close(const struct lore_global_args_t *globals,
 void lore_revision_tree_close_async(const struct lore_global_args_t *globals,
                                     const struct lore_revision_tree_close_args_t *args,
                                     struct lore_event_callback_config_t callback);
+
+// Resolve a UTF-8 path against a loaded revision tree to a node id. An empty
+// path resolves to the root node.
+//
+// | Terminal event                                       | Payload                                             | Notes                                                       |
+// |------------------------------------------------------|-----------------------------------------------------|-------------------------------------------------------------|
+// | `LORE_EVENT_REVISION_TREE_RESOLVE_PATH_COMPLETE`     | `lore_revision_tree_resolve_path_complete_event_data_t` | Carries the resolved node id and the per-call outcome   |
+int32_t lore_revision_tree_resolve_path(const struct lore_global_args_t *globals,
+                                        const struct lore_revision_tree_resolve_path_args_t *args,
+                                        struct lore_event_callback_config_t callback);
+
+// Resolve a UTF-8 path against a loaded revision tree (async variant).
+void lore_revision_tree_resolve_path_async(const struct lore_global_args_t *globals,
+                                           const struct lore_revision_tree_resolve_path_args_t *args,
+                                           struct lore_event_callback_config_t callback);
